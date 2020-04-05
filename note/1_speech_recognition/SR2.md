@@ -82,7 +82,7 @@ CTC其实就可以简单的理解为将Decoder替换为Classifier；
 
 ![](png/sr2_9.png)
 
-还存在一个问题：在训练的时候标签又该怎么产生呢？（比如输入是4个vector，而输出只有两个token，此时就需要插入$\phi$或者采用重复的方式，具体应该选用这么多不同形式中的哪种）：
+还存在一个问题：在训练的时候标签又该怎么产生呢？（比如输入是4个vector，而输出只有两个token，此时就需要插入$\phi$或者采用重复的方式，具体应该选用这么多不同形式中的哪种），即如何进行alignment：
 
 - CTC里面采用穷举所有的可能都作为Ground Truth（具体如何穷举，之后再讲）
 
@@ -92,5 +92,47 @@ CTC其实就可以简单的理解为将Decoder替换为Classifier；
 
 ## RNN-T
 
+在介绍RNN-T之前，先介绍RNA（Recurrent Neural Aligner）：可以认为RNA介于CTC和RNN-T之间，其主要的思想就是将Linear Classifier替换成了
 
+![](png/sr2_11.png)
+
+> 将Linear Classifier存在的independent利用RNN等结构来克服就好了
+
+而RNN-T在RNA基础上面添加了：运行一个输入允许对应多个输出（即输入一个$h$直到输出$\phi$再输入下一个$h$）
+
+![](png/sr2_12.png)
+
+> 所以总的$\phi$刚好和输入的数目相同
+
+和CTC类似，RNN-T也需要进行Alignment（在哪些位置插入$\phi$，有多种选择）
+
+- 同样的，穷举所有的可能就好
+
+但实际上，RNN-T的Decoder其实不是如上图黄色部分采用RNN的情况，其实还是采用Linear Classifer，只是在外部引入一个额外的RNN来消除independent的影响：
+
+![](png/sr2_13.png)
+
+至于为何采用另外一个RNN（Language Model）的原因：
+
+1. Language Model可以采用大量的文字训练好这个LM（之后在接入RNN-T进行联合训练）：由于大量文字里面并没有$\phi$，所以要忽略$\phi$。
+2. 更本质的理由是为了训练而设计的（忽略掉$\phi$，对后续alignment的穷举起到关键作用—）
+
+## Neural Transducer
+
+![](png/sr2_14.png)
+
+简言之：每次输入一个window的RNN-T
+
+## MoChA
+
+不是固定的window，而是采用dynamic的window，引入一个Attention机制来决定是否将window放在这个位置：
+
+![](png/sr2_15.png)
+
+- 在这篇论文里面，每个窗口只对应一个输出，并没有$\phi$这个东西
+- 关于这里下一个窗口具体应该从哪里开始？（后续需要读下论文）
+
+## 总结
+
+![](png/sr2_16.png)
 
