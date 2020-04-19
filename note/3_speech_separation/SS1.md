@@ -71,3 +71,152 @@ SI-SDR的定义为：
 
 - PESQ：Perceptual evaluation of speech quality
 - STOI：Short-time objective intelligibility
+
+## 3. 如何训练一个Speech Separation
+
+首先先来看下训练的时候会遇到的一个问题：
+
+![](png/ss1_10.png)
+
+为什么这个顺序会成为问题呢？假设有下述这种情况：
+
+![](png/ss1_12.png)
+
+- 那么按照图中的Ground Truth的话，就会使得Network很难学（因为它不知道上面的分支应该学到男生的声音还是女生的声音——因为GT一会儿是男生的，一会儿是女生的。 你可以类别检测里面一个分支学分类，一个分支学检测，显然是各司其职）。直观的一些解决方法：
+  - 那就强行让上面的为male，下面的为female：那么预测阶段碰到两个male的，估计就要凉凉
+- 上述问题被称为Permutation Issue
+
+> 虽然你可能会觉得不管三七二十一，随机将某个人的放到上面硬学一发；这样会到来的问题就是：你很可能输入同一段话—一句希望分出上面是A，下面是B；而另一句希望上面是B，下面是A
+
+==下面的内容主要围绕如何解决这个问题来展开的==。
+
+### ① Deep Clustering
+
+在进入具体后续内容之前，我们其实可以将问题转换一下：输入的混合声音X其实就是两个声音X1和X2的叠加，那么speaker separation做的事情其实非常简单，产生两个掩码M1和M2（往往满足M1+M2=1）来拆分自己就好：
+
+![](png/ss1_13.png)
+
+如何获取这个Mask（$M_1$和$M_2$）呢？其实可以采用Ideal Binary Mask来获取：
+
+![](png/ss1_14.png)
+
+> 即利用原先声音的Ground Truth，利用谁的数值大就将谁的Mask置为1，另一个置为0；将这种方式获得的Mask作为Mask的Ground Truth
+
+那么现在的问题在于学一个Mask Generation，而对应的Ground Truth就是左图的方式获得的Ideal Binary Mask
+
+> 注：上面的Mask其实依旧还是存在谁先谁后的问题
+
+下面就具体介绍Deep Cluster是如何做的
+
+① 先来看Inference阶段：
+
+![](png/ss1_15.png)
+
+- 这里有个很有趣的点哦：K-means其实产生的聚类结果哪个是第一类，哪个是第二类其实是随机的，所以产生的Mask谁先谁后其实是都有可能的哦！：但这并不妨碍Speech Separation这一过程。
+
+② 下面来看Training阶段
+
+由于K-means不可微分，所以训练采用的方式其实和k-means是无关的：
+
+![](png/ss1_16.png)
+
+- 只要这里能够学到同一个人的特质相似，就会在聚类的时候聚到同一类
+
+总结：
+
+1. Deep Clustering其实效果是蛮好的
+2. Deep Clustering存在的问题就是：训练不是end-to-end的——一方面由于k-means的存在，另一方面由于利用了Ideal Binary Mask（毕竟Ideal Binary Mask也是一种近似）
+
+### ② Permutation Invariant  Training（PIT）
+
+这个方法的核心思想就是：哪种排序的损失更低，就采用哪种排序
+
+![](png/ss1_17.png)
+
+- 但这里的问题就是，我们只有一个比较好的模型得到的loss高低才具有比较好的借鉴意义
+
+作者的解决方法：不管，就随着训练过程的进行，这种分配会越来越合理：
+
+![](png/ss1_18.png)
+
+- 可以看到前面20个epoch，先后顺序发生改变的数量还是比较大的，但是到了40个epoch之后基本就不出现改变了。（因为一个epoch扫过了所有的数据，所以可以统计有多少比例发生了顺序变换）
+
+### ③ TasNet (Time-domain Audio Separation Network)
+
+![](png/ss1_19.png)
+
+- 这篇主要在输入输出上没有采用Spectrogram等
+- 以及网络结构更深
+- 训练的时候也采用了PIT的方式 
+
+下面先来看下Encoder和Decoder：
+
+![](png/ss1_20.png)
+
+- Encoder和Decoder部分就是简单的Linear  Transformation
+- 关于是否对Encoder的输出做ReLU（全都转为正数）：实验情况是没有必要
+- 关于是否要保证Encoder和Decoder之间满足Inverse的关系 ：实验情况是保持Inverse反而影响实验结果
+- 在实际情况：是输入一串的声音，然后产生N个512-d的向量
+
+下面是Separator模块：
+
+![](png/ss1_21.png)
+
+- 输入可以看出是`Nx1x512`，然后经过一系列卷积之后变成`Nx2x512`，对应两个Mask
+- 其中的Sigmoid以及sum  to 1都是可以去掉的
+
+论文中真实采用的Separator则是一个非常深的网络，如下图所示：
+
+![](png/ss1_22.png)
+
+- 相当于听过了1.53秒的声音，才产生此mask
+
+### ④ 其他
+
+下面给出各个论文里面一些性能结果：
+
+![](png/ss1_23.png)
+
+- 但并不是说该结果好，就一定泛化性能好；在很多情况下，Deep Clustering反而效果更好
+
+## 4.  更多内容
+
+关于Speech Separation还有很多可以探索的内容。
+
+### ① Unknown number of speakers
+
+> 当不知道有几个人声音混合的时候，怎么分离这些人的声音
+
+![](png/ss1_24.png)
+
+- 每次只分离一个人出来
+- 还关联到多少次迭代之后该停止（即几时只有两个人了）
+
+> [Recursive speech separation for unknown number of speakers](https://arxiv.org/pdf/1904.03065.pdf)
+
+###  ② Multiple Microphones
+
+> 超过一个麦克风的情况
+
+![](png/ss1_26.png)
+
+- 输入多个麦克风的声音讯号，输入对应希望的Ground Truth，强行学就好了。
+
+> [FaSNet: Low-latency Adaptive Beamforming for Multi-microphone Audio Processing](https://arxiv.org/abs/1909.13387)
+
+### ③  Visual Information
+
+> 用影像（图像或者视频）的资讯来增强Speech Separation
+
+比如圈出A的人头，就分离A的声音；圈出B的头像，分理B的声音；如果两者都圈出来，则输出两者声音的混合。（具体怎么实现见：[Looking to Listen at the Cocktail Party: A Speaker-Independent Audio-Visual Model for Speech Separation](https://arxiv.org/abs/1804.03619)）
+
+### ④ 任务导向
+
+> 我们做这个分离的目标可能不同：比如让人听得更清楚，或者让某个机器接收（看是否接收正确）；不同的情况的优化目标其实是不同的
+
+![](png/ss1_25.png)
+
+- 人在意的是可理解性
+- 机器在意的可能和人不同（比如语音分离后面接一个语音辨识，而语音辨识可能关注某些人不同敏感的内容）
+
+从而导致采用的优化目标函数不同
